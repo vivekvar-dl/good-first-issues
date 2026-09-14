@@ -40,6 +40,8 @@ The CLI uses the alias `gfi` to run commands.
   - [🐙 Query all repos with topic `hacktoberfest`](#-query-all-repos-with-topic-hacktoberfest)
     - [Query all repos with topic 'hacktoberfest' in an organization or in a user profile](#query-all-repos-with-topic-hacktoberfest-in-an-organization-or-in-a-user-profile)
   - [📏 Search for issues within a certain period](#-search-for-issues-within-a-certain-period)
+  - [🔤 Filter by programming language](#-filter-by-programming-language)
+  - [🔎 Filter by keyword](#-filter-by-keyword)
   - [⚖️ Limit output](#️-limit-output)
   - [🌐 View issues on browser](#-view-issues-on-browser)
   - [👀 Show the CLI version](#-show-the-cli-version)
@@ -166,6 +168,34 @@ $ gfi search "yankeexe" --user --repo "good-first-issues" -p "600 days"
 
 --period 3 d,day,days
 
+```
+
+### 🔤 Filter by programming language
+
+`--language` (`-L`) keeps issues whose repository language matches GitHub's language field. Matching is case-insensitive.
+
+```bash
+$ gfi search "yankeexe" --user --language Python
+
+$ gfi search "facebook" --language JavaScript
+```
+
+> `-l` is already used by `--limit`, so the short flag for language is `-L`.
+
+### 🔎 Filter by keyword
+
+`--keyword` (`-k`) keeps issues whose title or body contains the keyword. Matching is case-insensitive.
+
+```bash
+$ gfi search "yankeexe" --user --keyword API
+
+$ gfi search "rust-lang" -k documentation
+```
+
+Both flags are optional and can be combined:
+
+```bash
+$ gfi search "yankeexe" --user --language Python --keyword API
 ```
 
 ### ⚖️ Limit output

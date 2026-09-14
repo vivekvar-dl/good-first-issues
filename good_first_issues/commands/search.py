@@ -78,6 +78,18 @@ $ gfi search "yankeexe" --user --repo "good-first-issues" -p "600 days"
     is_flag=True,
 )
 @click.option("--period", "-p", help=period_help_msg)
+@click.option(
+    "--language",
+    "-L",
+    help="Filter issues by repository programming language (e.g. Python, JavaScript)",
+    type=str,
+)
+@click.option(
+    "--keyword",
+    "-k",
+    help="Filter issues whose title or body contains this keyword",
+    type=str,
+)
 @click.argument("name", required=False)
 def search(
     name: str,
@@ -88,6 +100,8 @@ def search(
     all: bool,
     hacktoberfest: bool,
     period: str,
+    language: Optional[str],
+    keyword: Optional[str],
 ):
     """Search for good first issues in organizations or user repositories.
 
@@ -109,6 +123,10 @@ def search(
 
         gfi search "ollama" --repo "ollama-python"
 
+    ➡️ filter by language and keyword
+
+        gfi search "yankeexe" --user --language Python --keyword API
+
     """
 
     if name is None and hacktoberfest is False:
@@ -127,7 +145,7 @@ def search(
 
     # Identify the flags passed.
     query, variables, mode = services.identify_mode(
-        name, repo, user, hacktoberfest, period, limit
+        name, repo, user, hacktoberfest, period, limit, language, keyword
     )
 
     # Spinner
@@ -148,7 +166,16 @@ def search(
 
     if mode == "search":
         issues, rate_limit = services.extract_search_results(response)
+
+    issues = services.filter_issues(issues, language, keyword)
+    if mode == "search" and issues:
         issues = issues[:limit]  # cannot set limit on the search_query directly
+
+    if issues:
+        issues = [
+            (issue["title"], issue["url"]) if isinstance(issue, dict) else issue[:2]
+            for issue in issues
+        ]
 
     table_headers: List = ["Title", "Issue URL"]
 

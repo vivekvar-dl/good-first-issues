@@ -18,10 +18,14 @@ query SearchGoodFirstIssues($searchQuery: String!, $limit: Int!) {
         author {
           login
         }
+        body
         repository {
           name
           owner {
             login
+          }
+          primaryLanguage {
+            name
           }
         }
         labels(first: 3) {
@@ -45,11 +49,15 @@ query search($queryString: String!){
       node {
         ... on Repository {
           url
+          primaryLanguage {
+            name
+          }
           issues(filterBy: { states: OPEN, labels: "good first issue" }, first: 2) {
             edges {
             node {
                   title
                   url
+                  body
                 }
               }
           }
