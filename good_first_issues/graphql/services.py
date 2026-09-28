@@ -17,7 +17,6 @@ console = Console(color_system="auto")
 spinner: Halo = Halo(text="Looking for good first issues...", spinner="dots")
 
 # Type Aliases
-BaseIssueEdges = Iterator[Dict[str, Dict[str, str]]]
 ExtractedRepoIssues = Tuple[List[Tuple[Optional[str], Optional[str]]], int]
 
 
@@ -37,35 +36,35 @@ def org_user_pipeline(payload: Dict, mode: str) -> Tuple[Iterable, int]:
 
     spinner.start()
 
-    # Generator pipeline: Extract issue title and url.
-    # pipeline: Iterable = get_issues(get_base_issues(base_data))
-    issues = [(data.get("title"), data.get("url")) for data in base_data]
+    issues = [_issue_record(data, data.get("repository")) for data in base_data]
 
     spinner.succeed("Search Complete.")
 
     return issues, rate_limit
 
 
-def get_base_issues(data: List) -> BaseIssueEdges:
+def get_base_issues(data: List) -> Iterator[Tuple[List, Optional[str]]]:
     """
-    Get the edge that connects to the issue nodes.
+    Get the edge that connects to the issue nodes, plus repo language.
     """
     for item in data:
-        edges = item.get("node").get("issues").get("edges")
+        node = item.get("node") or {}
+        edges = (node.get("issues") or {}).get("edges")
+        language_name = _repo_language(node)
 
         # Remove empty list.
         if edges:
-            yield edges
+            yield edges, language_name
 
 
-def get_issues(issues: BaseIssueEdges) -> Iterator[Tuple[str, str]]:
+def get_issues(issues: Iterator[Tuple[List, Optional[str]]]) -> Iterator[Dict]:
     """
-    Extracts issue title and URL from the payload.
+    Extracts issue title, URL, body, and repository language from the payload.
     """
-    flat_list: List = [item for sublist in issues for item in sublist]
-
-    for issue in flat_list:
-        yield issue.get("node").get("title"), issue.get("node").get("url")
+    for edges, language_name in issues:
+        for issue in edges:
+            record = _issue_record(issue.get("node") or {}, language=language_name)
+            yield record
 
 
 def extract_repo_issues(
@@ -116,8 +115,98 @@ def extract_search_results(payload: Dict) -> Tuple[Iterable, int]:
     return list(pipeline), rate_limit
 
 
+def _repo_language(repository: Optional[Dict]) -> str:
+    """Return the repository primary language name, if present."""
+    if not repository:
+        return ""
+
+    primary = repository.get("primaryLanguage")
+    if not primary:
+        return ""
+
+    return primary.get("name") or ""
+
+
+def _issue_record(
+    node: Optional[Dict],
+    repository: Optional[Dict] = None,
+    language: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Build a normalized issue record from a GraphQL issue node."""
+    node = node or {}
+    repo = repository if repository is not None else node.get("repository")
+    return {
+        "title": node.get("title"),
+        "url": node.get("url"),
+        "body": node.get("body") or "",
+        "language": language if language is not None else _repo_language(repo),
+    }
+
+
+def _append_search_filters(
+    query: str, language: Optional[str], keyword: Optional[str]
+) -> str:
+    """Append optional language and keyword qualifiers to a GitHub search query."""
+    if language:
+        query = f'{query} language:"{language}"'
+
+    if keyword:
+        sanitized_keyword = keyword.replace('"', "")
+        query = f'{query} "{sanitized_keyword}" in:title,body'
+
+    return query
+
+
+def filter_issues(
+    issues: Optional[Iterable],
+    language: Optional[str] = None,
+    keyword: Optional[str] = None,
+) -> Optional[List]:
+    """Filter issues by repository language and/or keyword.
+
+    Language is matched against the repository programming language
+    (GitHub primaryLanguage), case-insensitive. Keyword is matched against
+    the issue title or body, case-insensitive. Omitted filters leave results
+    unchanged. Both filters can be combined.
+    """
+    if not issues or (not language and not keyword):
+        return list(issues) if issues is not None else issues
+
+    language_key = language.lower() if language else None
+    keyword_key = keyword.lower() if keyword else None
+
+    filtered: List = []
+    for issue in issues:
+        if isinstance(issue, dict):
+            title = issue.get("title") or ""
+            body = issue.get("body") or ""
+            repo_language = issue.get("language") or ""
+        else:
+            title = issue[0] or ""
+            body = issue[2] if len(issue) > 2 and issue[2] else ""
+            repo_language = issue[3] if len(issue) > 3 and issue[3] else ""
+
+        if language_key and repo_language.lower() != language_key:
+            continue
+
+        haystack = f"{title}\n{body}".lower()
+        if keyword_key and keyword_key not in haystack:
+            continue
+
+        filtered.append(issue)
+
+    return filtered
+
+
 def identify_mode(
-    name: str, repo: str, user: bool, hacktoberfest: bool, period: str, limit: int
+    name: str,
+    repo: str,
+    user: bool,
+    hacktoberfest: bool,
+    period: str,
+    limit: int,
+    language: Optional[str] = None,
+    keyword: Optional[str] = None,
 ) -> Tuple[str, Dict, str]:
     """
     Identify the mode based on arguments passed.
@@ -133,6 +222,11 @@ def identify_mode(
 
     if period:
         base_variable = f"{base_variable} created:>={period}"
+
+    # Issue search: language uses GitHub's repo language field; keyword
+    # matches title or body. Hacktoberfest is a repository search, so
+    # keyword is applied client-side after issues are fetched.
+    base_variable = _append_search_filters(base_variable, language, keyword)
 
     if name and user and repo:
         # If CLI gets the --user flag along with the --repo flag, look into that particular repo.
@@ -158,6 +252,8 @@ def identify_mode(
         search_query_var = "topic:hacktoberfest"
         if period:
             search_query_var = f"{search_query_var} created:>={period}"
+        if language:
+            search_query_var = f'{search_query_var} language:"{language}"'
         variables["queryString"] = search_query_var
         mode = "search"
 
